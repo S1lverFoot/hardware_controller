@@ -1,30 +1,30 @@
-use hardware_controller::{TelemetryCounter, process_telemetry_with_timeout, Memoizer, EvictionPolicy};
-use std::thread;
-use std::time::Duration;
-
-fn heavy_dsp_calculation(signal_voltage: u32) -> String {
-    thread::sleep(Duration::from_secs(1)); 
-    format!("Оброблений сигнал: {}mV", signal_voltage * 2)
-}
+use hardware_controller::CommandQueue;
 
 fn main() {
-    println!("--- ЗАПУСК СИСТЕМИ (TASK 1) ---");
-    let sensor_generator = TelemetryCounter::new(1000);
-    process_telemetry_with_timeout(sensor_generator, 2);
+    println!("ТЕСТУВАННЯ ЧЕРГИ КОМАНД (TASK 4)\n");
 
-    println!("\n--- ТЕСТ КЕШУВАННЯ (TASK 3) ---");
-    
-    let mut signal_processor = Memoizer::new(
-        heavy_dsp_calculation, 
-        2, 
-        EvictionPolicy::Lru
-    );
+    let mut controller_queue = CommandQueue::new();
 
-    signal_processor.call(5);
-    
-    signal_processor.call(10);
-    
-    signal_processor.call(5);
+    controller_queue.enqueue("Блимати зеленим світлодіодом", 1);    // Низький пріоритет (додано першим - oldest)
+    controller_queue.enqueue("Оновити прошивку по Wi-Fi", 5);       // Середній пріоритет
+    controller_queue.enqueue("ЕКСТРЕНА ЗУПИНКА ЖИВЛЕННЯ!", 100);    // Супер високий пріоритет
+    controller_queue.enqueue("Перевірити статус батареї", 2);       // Низький пріоритет (додано останнім - newest)
 
-    signal_processor.call(15);
+    println!("\n--- ПОЧИНАЄМО ВИКОНАННЯ КОМАНД ---");
+
+    if let Some(cmd) = controller_queue.dequeue_highest() {
+        println!("Виконую Highest Priority: {}", cmd.action);
+    }
+
+    if let Some(cmd) = controller_queue.dequeue_lowest() {
+        println!("Виконую Lowest Priority: {}", cmd.action);
+    }
+
+    if let Some(cmd) = controller_queue.dequeue_newest() {
+        println!("Виконую Newest (останню додану): {}", cmd.action);
+    }
+
+    if let Some(cmd) = controller_queue.dequeue_oldest() {
+        println!("Виконую Oldest (найдавнішу): {}", cmd.action);
+    }
 }

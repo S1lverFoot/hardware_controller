@@ -103,3 +103,69 @@ where
         result
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct HardwareCommand {
+    pub action: String,
+    pub priority: i32, 
+    pub order_id: u64, 
+}
+
+pub struct CommandQueue {
+    queue: Vec<HardwareCommand>,
+    global_counter: u64,
+}
+
+impl CommandQueue {
+    pub fn new() -> Self {
+        Self {
+            queue: Vec::new(),
+            global_counter: 0,
+        }
+    }
+
+    pub fn enqueue(&mut self, action: &str, priority: i32) {
+        let cmd = HardwareCommand {
+            action: action.to_string(),
+            priority,
+            order_id: self.global_counter,
+        };
+        self.queue.push(cmd);
+        self.global_counter += 1;
+        println!("[ЧЕРГА] Додано команду: '{}' (Пріоритет: {})", action, priority);
+    }
+
+    fn dequeue_by<F>(&mut self, mut compare: F) -> Option<HardwareCommand>
+    where
+        F: FnMut(&HardwareCommand, &HardwareCommand) -> std::cmp::Ordering,
+    {
+        if self.queue.is_empty() {
+            return None;
+        }
+        
+        let index = self
+            .queue
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| compare(a, b))
+            .map(|(i, _)| i)?;
+
+        Some(self.queue.remove(index))
+    }
+
+    pub fn dequeue_highest(&mut self) -> Option<HardwareCommand> {
+        self.dequeue_by(|a, b| a.priority.cmp(&b.priority))
+    }
+
+    pub fn dequeue_lowest(&mut self) -> Option<HardwareCommand> {
+        self.dequeue_by(|a, b| b.priority.cmp(&a.priority))
+    }
+
+    pub fn dequeue_oldest(&mut self) -> Option<HardwareCommand> {
+        self.dequeue_by(|a, b| b.order_id.cmp(&a.order_id))
+    }
+
+    pub fn dequeue_newest(&mut self) -> Option<HardwareCommand> {
+        self.dequeue_by(|a, b| a.order_id.cmp(&b.order_id))
+    }
+}
