@@ -209,28 +209,69 @@ where
     Some(results)
 } 
 
-use tokio_stream::{Stream, StreamExt};
-pub fn create_radio_data_stream() -> impl Stream<Item = Vec<u8>> {
-    tokio_stream::iter(1..=1_000_000).map(|chunk_number| {
-        let fake_iq_data = vec![(chunk_number % 255) as u8; 1024];
-        fake_iq_data
-    })
+pub fn create_real_sdr_stream() -> tokio_stream::wrappers::ReceiverStream<Vec<u8>> {
+    use rtlsdr::open;
+    use std::thread;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    let (tx, rx) = mpsc::channel(100);
+
+    thread::spawn(move || {
+        println!("[SDR] Шукаю пристрій RTL-SDR...");
+        
+        let mut sdr = match open(0) {
+            Ok(dev) => dev,
+            Err(_) => {
+                println!("[ERROR] RTL-SDR не знайдено! Перевірте підключення по USB.");
+                return;
+            }
+        };
+        sdr.set_center_freq(100_000_000).unwrap(); 
+        sdr.set_sample_rate(2_048_000).unwrap();
+        sdr.reset_buffer().unwrap();
+        
+        println!("[SDR] Підключено! Починаю прийом даних з антени...");
+
+        loop {
+            match sdr.read_sync(16384) {
+                Ok(buffer) => {
+                    if tx.blocking_send(buffer).is_err() {
+                        println!("[SDR] Канал закрився, зупиняю антену.");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    println!("[SDR ERROR] Помилка читання з антени: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    ReceiverStream::new(rx)
 }
 
 pub async fn process_radio_stream<S>(mut stream: S, demo_limit: usize) 
 where
-    S: Stream<Item = Vec<u8>> + std::marker::Unpin,
+    S: tokio_stream::Stream<Item = Vec<u8>> + std::marker::Unpin,
 {
+    use tokio_stream::StreamExt;
+    
     let mut chunks_processed = 0;
     let mut total_bytes = 0;
+
     while let Some(chunk) = stream.next().await {
         chunks_processed += 1;
         total_bytes += chunk.len();
-        println!("[STREAM] Завантажено чанк №{}. Розмір: {} байт. Загалом оброблено: {} байт", 
+
+        println!("[STREAM] Завантажено реальний чанк №{}. Розмір: {} байт. Загалом: {} байт", 
                  chunks_processed, chunk.len(), total_bytes);
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
         if chunks_processed >= demo_limit {
-            println!("[STREAM] Досягнуто ліміт демо-обробки. Зупиняємось.");
+            println!("[STREAM] Досягнуто ліміт демо-обробки. Зупиняємо SDR.");
             break;
         }
     }
@@ -341,4 +382,32 @@ impl AuthProxy {
             }
         }
     }
+}
+
+#[macro_export]
+macro_rules! log_execution {
+    ($level:expr, $func:ident($($arg:expr),*)) => {{
+        use chrono::Local;
+        use std::time::Instant;
+
+        let start_time = Instant::now();
+        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        if $level != "ERROR" {
+            println!("[{}] [{}] Виклик {}({:?})", timestamp, $level, stringify!($func), ($($arg),*));
+        }
+
+        let result = $func($($arg),*);
+        let elapsed = start_time.elapsed();
+        if $level == "ERROR" {
+            if let Err(ref e) = result {
+                println!("[{}] [ERROR] Функція {} впала з помилкою: {:?} (Час: {:?})", 
+                         timestamp, stringify!($func), e, elapsed);
+            }
+        } else {
+            println!("[{}] [{}] Результат {}: {:?} (Час виконання: {:?})", 
+                     timestamp, $level, stringify!($func), result, elapsed);
+        }
+
+        result
+    }};
 }
