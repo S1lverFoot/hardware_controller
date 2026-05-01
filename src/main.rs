@@ -1,54 +1,24 @@
-use hardware_controller::{EventBus, SystemEvent};
-use std::time::Duration;
+use hardware_controller::{AuthProxy, HttpRequest, ApiKeyStrategy, JwtStrategy};
 
-#[tokio::main]
-async fn main() {
-    println!("ТЕСТ РЕАКТИВНОЇ ВЗАЄМОДІЇ (TASK 7)\n");
-    let event_bus = EventBus::new(16);
-    let mut cooler_receiver = event_bus.subscribe();
-    
-    tokio::spawn(async move {
-        while let Ok(event) = cooler_receiver.recv().await {
-            match event {
-                SystemEvent::TemperatureHigh(temp) => {
-                    println!("[КУЛЕР] Відчув перегрів ({}°C)! Вмикаю вентилятори на 100%.", temp);
-                }
-                SystemEvent::SystemShutdown => {
-                    println!("[КУЛЕР] Отримав наказ на вимкнення. Зупиняю обертання.");
-                    break; 
-                }
-                _ => {} 
-            }
-        }
-        println!("[КУЛЕР] Відключився від шини подій.");
-    });
+fn main() {
+    println!("ТЕСТ АВТОРИЗАЦІЙНОГО ПРОКСІ (TASK 8)\n");
+    let request1 = HttpRequest::new("https://cloud-server.com/api/telemetry", "{ temp: 45, fan: 1200 }");
+    let mut api_proxy = AuthProxy::new(Box::new(ApiKeyStrategy {
+        api_key: "super_secret_hardware_key_999".to_string(),
+    }));
 
-    let mut display_receiver = event_bus.subscribe();
-    
-    tokio::spawn(async move {
-        while let Ok(event) = display_receiver.recv().await {
-            match event {
-                SystemEvent::BatteryLow(percent) => {
-                    println!("[ДИСПЛЕЙ] Малює червону іконку: Батарея розряджена! Залишилося {}%.", percent);
-                }
-                SystemEvent::SystemShutdown => {
-                    println!("[ДИСПЛЕЙ] Прощавай! Гашу екран.");
-                    break; 
-                }
-                _ => {}
-            }
-        }
-        println!("[ДИСПЛЕЙ] Відключився від шини подій.");
-    });
+    let response1 = api_proxy.send_request(request1.clone());
+    println!("Результат сервера: HTTP {}\n", response1.status);
+    api_proxy.set_strategy(Box::new(JwtStrategy {
+        token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
+    }));
 
-    println!("Система активована. Датчики починають публікувати події...\n");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    event_bus.publish(SystemEvent::TemperatureHigh(85.5));
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    event_bus.publish(SystemEvent::BatteryLow(15));
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    event_bus.publish(SystemEvent::SystemShutdown);
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let response2 = api_proxy.send_request(request1.clone());
+    println!("Результат сервера: HTTP {}\n", response2.status);
+    api_proxy.set_strategy(Box::new(JwtStrategy {
+        token: "".to_string(),
+    }));
 
-    println!("\nТест реактивної системи успішно завершено!");
+    let response3 = api_proxy.send_request(request1);
+    println!("Результат сервера: HTTP {}\n", response3.status);
 }

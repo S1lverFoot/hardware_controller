@@ -262,3 +262,83 @@ impl EventBus {
         let _ = self.sender.send(event);
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct HttpRequest {
+    pub url: String,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+impl HttpRequest {
+    pub fn new(url: &str, body: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            headers: HashMap::new(),
+            body: body.to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub data: String,
+}
+
+pub trait AuthStrategy {
+    fn apply_auth(&self, request: &mut HttpRequest) -> Result<(), String>;
+}
+
+pub struct ApiKeyStrategy {
+    pub api_key: String,
+}
+impl AuthStrategy for ApiKeyStrategy {
+    fn apply_auth(&self, request: &mut HttpRequest) -> Result<(), String> {
+        request.headers.insert("X-API-KEY".to_string(), self.api_key.clone());
+        Ok(())
+    }
+}
+
+pub struct JwtStrategy {
+    pub token: String,
+}
+impl AuthStrategy for JwtStrategy {
+    fn apply_auth(&self, request: &mut HttpRequest) -> Result<(), String> {
+        if self.token.is_empty() {
+            return Err("JWT токен відсутній або прострочений!".to_string());
+        }
+        request.headers.insert("Authorization".to_string(), format!("Bearer {}", self.token));
+        Ok(())
+    }
+}
+
+pub struct AuthProxy {
+    strategy: Box<dyn AuthStrategy>, 
+}
+
+impl AuthProxy {
+    pub fn new(strategy: Box<dyn AuthStrategy>) -> Self {
+        Self { strategy }
+    }
+
+    pub fn set_strategy(&mut self, new_strategy: Box<dyn AuthStrategy>) {
+        println!("[PROXY] Стратегію авторизації змінено!");
+        self.strategy = new_strategy;
+    }
+
+    pub fn send_request(&self, mut request: HttpRequest) -> HttpResponse {
+        println!("\n[PROXY] Перехоплено запит до: {}", request.url);
+        match self.strategy.apply_auth(&mut request) {
+            Ok(_) => {
+                println!("[PROXY] Авторизацію успішно додано, заголовки: {:?}", request.headers);
+                println!("[СЕРВЕР] Отримано дані: {}. Зберігаю...", request.body);
+                HttpResponse { status: 200, data: "Дані збережено успішно".to_string() }
+            }
+            Err(e) => {
+                println!("[PROXY ERROR] Відмовлено в доступі: {}", e);
+                HttpResponse { status: 401, data: "Unauthorized".to_string() }
+            }
+        }
+    }
+}
