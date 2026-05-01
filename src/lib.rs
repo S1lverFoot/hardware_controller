@@ -235,3 +235,30 @@ where
         }
     }
 }
+
+use tokio::sync::broadcast;
+#[derive(Debug, Clone)]
+pub enum SystemEvent {
+    BatteryLow(u8),     
+    TemperatureHigh(f32), 
+    SystemShutdown,    
+}
+
+pub struct EventBus {
+    sender: broadcast::Sender<SystemEvent>,
+}
+
+impl EventBus {
+    pub fn new(capacity: usize) -> Self {
+        let (sender, _receiver) = broadcast::channel(capacity);
+        Self { sender }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<SystemEvent> {
+        self.sender.subscribe()
+    }
+
+    pub fn publish(&self, event: SystemEvent) {
+        let _ = self.sender.send(event);
+    }
+}
