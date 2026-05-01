@@ -6,3 +6,4 @@ authors = ["Illia Kudashov s1lvefoot@proton.me"]
 license = "MIT"
 [dependencies]
 tokio = { version = "1.52.1", features = ["full"] }
+tokio-stream = "0.1.18"

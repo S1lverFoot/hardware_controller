@@ -208,3 +208,30 @@ where
 
     Some(results)
 } 
+
+use tokio_stream::{Stream, StreamExt};
+pub fn create_radio_data_stream() -> impl Stream<Item = Vec<u8>> {
+    tokio_stream::iter(1..=1_000_000).map(|chunk_number| {
+        let fake_iq_data = vec![(chunk_number % 255) as u8; 1024];
+        fake_iq_data
+    })
+}
+
+pub async fn process_radio_stream<S>(mut stream: S, demo_limit: usize) 
+where
+    S: Stream<Item = Vec<u8>> + std::marker::Unpin,
+{
+    let mut chunks_processed = 0;
+    let mut total_bytes = 0;
+    while let Some(chunk) = stream.next().await {
+        chunks_processed += 1;
+        total_bytes += chunk.len();
+        println!("[STREAM] Завантажено чанк №{}. Розмір: {} байт. Загалом оброблено: {} байт", 
+                 chunks_processed, chunk.len(), total_bytes);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        if chunks_processed >= demo_limit {
+            println!("[STREAM] Досягнуто ліміт демо-обробки. Зупиняємось.");
+            break;
+        }
+    }
+}
