@@ -169,3 +169,42 @@ impl CommandQueue {
         self.dequeue_by(|a, b| a.order_id.cmp(&b.order_id))
     }
 }
+
+use std::future::Future;
+pub fn map_sensors_callback<T, R, F, C>(data: Vec<T>, mut transform: F, mut on_complete: C)
+where
+    F: FnMut(T) -> R,
+    C: FnMut(Vec<R>),
+{
+    let mut results = Vec::new();
+    for item in data {
+        results.push(transform(item));
+    }
+    on_complete(results);
+}
+
+pub async fn async_map_sensors<T, R, F, Fut>(
+    data: Vec<T>,
+    transform: F,
+    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Option<Vec<R>>
+where
+    F: Fn(T) -> Fut,
+    Fut: Future<Output = R>,
+{
+    let mut results = Vec::new();
+
+    for item in data {
+        tokio::select! {
+            res = transform(item) => {
+                results.push(res);
+            }
+            _ = &mut cancel_rx => {
+                println!("[АБОРТ] Сигнал скасування отримано! Зупиняємо опитування.");
+                return None;
+            }
+        } 
+    } 
+
+    Some(results)
+} 

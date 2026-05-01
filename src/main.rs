@@ -1,30 +1,41 @@
-use hardware_controller::CommandQueue;
+use hardware_controller::{
+    process_telemetry_with_timeout, CommandQueue, EvictionPolicy, Memoizer, TelemetryCounter,
+    async_map_sensors, map_sensors_callback,
+};
+use std::time::Duration;
+use tokio::sync::oneshot;
 
-fn main() {
-    println!("ТЕСТУВАННЯ ЧЕРГИ КОМАНД (TASK 4)\n");
+#[tokio::main]
+async fn main() {
+    println!("\n--- ТЕСТ АСИНХРОННОГО ОПИТУВАННЯ (TASK 5) ---");
+    let sensors = vec!["Температура", "Вольтаж", "Тиск", "Оберти кулера"];
+    println!(">> Запуск Callback-варіанту:");
+    map_sensors_callback(
+        sensors.clone(),
+        |sensor| format!("{} = OK", sensor), 
+        |results| println!("Callback результати: {:?}", results), 
+    );
 
-    let mut controller_queue = CommandQueue::new();
+    println!("\n>> Запуск Async-варіанту з підтримкою скасування:");
+    let (cancel_tx, cancel_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        let _ = cancel_tx.send(()); 
+    });
 
-    controller_queue.enqueue("Блимати зеленим світлодіодом", 1);    // Низький пріоритет (додано першим - oldest)
-    controller_queue.enqueue("Оновити прошивку по Wi-Fi", 5);       // Середній пріоритет
-    controller_queue.enqueue("ЕКСТРЕНА ЗУПИНКА ЖИВЛЕННЯ!", 100);    // Супер високий пріоритет
-    controller_queue.enqueue("Перевірити статус батареї", 2);       // Низький пріоритет (додано останнім - newest)
+    println!("Починаємо опитування датчиків (забере 4 секунди)...");
+    let result = async_map_sensors(
+        sensors,
+        |sensor| async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            println!("   Зчитано: {}", sensor);
+            format!("{} = 100%", sensor)
+        },
+        cancel_rx, 
+    ).await;
 
-    println!("\n--- ПОЧИНАЄМО ВИКОНАННЯ КОМАНД ---");
-
-    if let Some(cmd) = controller_queue.dequeue_highest() {
-        println!("Виконую Highest Priority: {}", cmd.action);
-    }
-
-    if let Some(cmd) = controller_queue.dequeue_lowest() {
-        println!("Виконую Lowest Priority: {}", cmd.action);
-    }
-
-    if let Some(cmd) = controller_queue.dequeue_newest() {
-        println!("Виконую Newest (останню додану): {}", cmd.action);
-    }
-
-    if let Some(cmd) = controller_queue.dequeue_oldest() {
-        println!("Виконую Oldest (найдавнішу): {}", cmd.action);
+    match result {
+        Some(data) => println!("Успішно зібрано: {:?}", data),
+        None => println!("ПОМИЛКА: Опитування було перервано через тайм-аут!"),
     }
 }
