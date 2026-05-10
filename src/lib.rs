@@ -257,18 +257,21 @@ where
     S: tokio_stream::Stream<Item = Vec<u8>> + std::marker::Unpin,
 {
     use tokio_stream::StreamExt;
-    
     let mut chunks_processed = 0;
-    let mut total_bytes = 0;
 
     while let Some(chunk) = stream.next().await {
         chunks_processed += 1;
-        total_bytes += chunk.len();
+        let mut total_power = 0.0;
+        let num_samples = chunk.len() / 2;
+        for i in (0..chunk.len() - 1).step_by(2) {
+            let i_val = chunk[i] as f64 - 127.5;
+            let q_val = chunk[i+1] as f64 - 127.5;
+            total_power += (i_val * i_val) + (q_val * q_val);
+        }
 
-        println!("[STREAM] Завантажено реальний чанк №{}. Розмір: {} байт. Загалом: {} байт", 
-                 chunks_processed, chunk.len(), total_bytes);
-
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let average_power = total_power / (num_samples as f64);
+        println!("[SDR ТЕЛЕМЕТРІЯ] Чанк №{} | Рівень шуму/сигналу: {:.2}", 
+                 chunks_processed, average_power);
 
         if chunks_processed >= demo_limit {
             println!("[STREAM] Досягнуто ліміт демо-обробки. Зупиняємо SDR.");
@@ -277,14 +280,13 @@ where
     }
 }
 
-use tokio::sync::broadcast;
 #[derive(Debug, Clone)]
 pub enum SystemEvent {
-    BatteryLow(u8),     
-    TemperatureHigh(f32), 
-    SystemShutdown,    
+    SignalSpike { freq_mhz: f64, power_db: f64 },
+    UsbBufferOverflow,
 }
 
+use tokio::sync::broadcast;
 pub struct EventBus {
     sender: broadcast::Sender<SystemEvent>,
 }
